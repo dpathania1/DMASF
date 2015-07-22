@@ -1,0 +1,449 @@
+#api.py the main API LAYER
+#written by Aprameya Rao, Manish Jain {aprameya, manish_jain}@students.iiit.net
+
+from constants import *
+
+import cPickle as pickle
+
+from db import *
+from host import *
+from ui_interface import *
+
+import time
+import threading
+import logging
+
+#from gui_qtinterface import *
+
+import sys
+
+class API:
+  global agent_types
+
+  def setupLogger(self):
+    self.logger = logging.getLogger('apiserver')
+    self.logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    #add formatter to ch and fh
+
+    fh = logging.FileHandler('log.apiserver')
+#    fh.setLevel(LOG_LEVEL)
+    fh.setFormatter(formatter)
+    sh = logging.StreamHandler()
+    #sh.setLevel(LOG_LEVEL)
+    sh.setFormatter(formatter)
+
+    self.logger.addHandler(fh)
+    self.logger.addHandler(sh)
+    self.logger.disabled = BLOGGING_DISABLED
+
+  
+  def __init__(self):
+    self.setupLogger()
+    self.lstHosts = []
+    self.db = DB()
+    self.simtime = 0 #time of the current simulation
+    self.maxsimtime = -1
+
+    self.objUIInterface = None
+
+    self.quit = False
+
+    self.MainLoopThread = threading.Thread(target = self.start)
+    self.evStartSim = threading.Event()
+    self.evStartSim.clear()
+    
+  def startSim(self):
+    """Called by the GUI when start is clicked"""
+    self.evStartSim.set()
+    print 'evStartSim set'
+  
+  def canStartSim(self):
+    for i in self.lstHosts:
+      if i.state != S_READY:
+        self.logger.debug('Host : ' + i.szHost + ':' + str(i.iPort) + ' not ready')
+        return False
+    return True
+
+      
+  def setMaxSimTime(self, maxtime):
+    """Maxtime = -1 is infinity"""
+    self.maxsimtime = maxtime
+  
+  def registerAgentType(self, agtype, handler, renderfunc, fields):
+    """REGISTERS an agent type with fields dict"""
+    newobj = {}
+    newobj['__type__'] = agtype
+    newobj['__handler__'] = handler
+    newobj['__renderfunc__'] = renderfunc
+    
+    newobj['__properties__'] = fields
+    newobj['__properties__']['id'] = TYPE_INTEGER
+    newobj['__properties__']['x'] = TYPE_FLOAT
+    newobj['__properties__']['y'] = TYPE_FLOAT
+    newobj['__properties__']['size'] = TYPE_INTEGER
+    newobj['__properties__']['theta'] = TYPE_FLOAT
+    newobj['__properties__']['shape'] = TYPE_INTEGER
+    newobj['__properties__']['color'] = TYPE_INTEGER
+    
+    newobj['__cache__'] = {}
+    newobj['__cache__']['__valid__'] = 0
+    
+    for i in CACHE_PERTYPE:
+      newobj['__cache__'][i] = None
+    
+    
+    
+    agent_types[agtype] = newobj
+
+    #for the create table statement
+    #will create the list of fields and type of field
+    flist = []
+    for i in newobj['__properties__'].keys():
+      newobj['__cache__'][i] = {}
+      for j in CACHE_PERFIELD:
+        newobj['__cache__'][i][j] = None
+      if i == 'id':
+        flist.append('id integer PRIMARY KEY')
+      else:        
+        flist.append(i + " " + newobj['__properties__'][i])
+    
+    query = 'CREATE TABLE ' + agtype + ' (\n' + ','.join(flist) + ');'
+
+    self.logger.debug('Register Agent Type: ' + agtype + 'SQL \n' + query)
+    #try:
+    qr = self.db.curs.execute(query)
+    self.logger.debug('results: ' + str(qr))
+    #query = 'CREATE INDEX ' + agtype + '_id ' + ' ON ' + agtype + ' (id);' 
+    #self.db.curs.execute(query)
+    #except:
+    #  return ERR_DBERR
+    
+    #try
+    self.db.writeType(agtype)
+    
+    return S_OK
+    
+  def killAgent(self,agtype,agentId):
+    self.db.deleteObject(agtype,agentId)
+  
+  def createAgent(self, agtype, fields):
+    """create an agent with initial properties = fields dict, func returns id"""
+    #print fields
+    #self.db.lockTable(agtype)
+    self.db.curs.execute('select max(id) from ' + agtype + ';')
+    id = self.db.curs.fetchall()[0][0]
+    if not id:
+      id = 1
+    else:
+      id = id + 1
+      
+    fields['id'] = id
+    
+    if ( not fields.has_key("shape") ):
+      fields["shape"] = SHAPE_TRIANGLE
+    
+    if ( not fields.has_key("color") ):
+      fields["color"] = COLOR_BLUE
+      
+    if ( not fields.has_key("theta") ):
+      fields["theta"] = 0
+      
+    if ( not fields.has_key("size") ):
+      fields["size"] = 40
+        
+    query = self.db.insertQueryFromFields(agtype, fields)
+    #print query
+    #self.db.updatelist.append(query)
+    self.db.curs.execute(query)
+    
+    return S_OK;
+  
+  def registerWorldHandler(self, worldhandler):
+    global world_handler
+    world_handler = worldhandler
+  
+  def bSimDone(self):
+    if self.quit == True:
+      return True
+    elif self.maxsimtime == -1:
+      return 0
+    else:
+      return (self.simtime) > self.maxsimtime
+
+#   def start0(self):
+#     if 0:
+#       t = threading.Thread(target = self.start)
+#       t.start()
+#       self.gui.initWindow()
+#     else:
+#       self.start()
+
+#   def start1(self):
+#     if 1:
+#       t = threading.Thread(target = self.start)
+#       t.start()
+#       self.gui.initWindow()
+#     else:
+#       self.start()
+      
+  def cleanNullTerminatedString(self, szNullTerm):
+    for i in xrange(len(szNullTerm)):
+      if szNullTerm[i] == '\x00':
+        return szNullTerm[:i]
+    return szNullTerm
+      
+
+  def unpackSimulationCommand(self, szCommand):
+    lstCommand = ['','']
+    
+    iCurPos = 0
+    
+    t1 = struct.unpack('16si', szCommand[:iCurPos + struct.calcsize('16si')])
+    iCurPos += struct.calcsize('16si')
+    lstCommand[0] = self.cleanNullTerminatedString(t1[0])
+    lstCommand[1] = t1[1]
+    
+    iTypeCount = struct.unpack('i', szCommand[iCurPos:iCurPos + struct.calcsize('i')])[0]
+    iCurPos += struct.calcsize('i')
+    
+    for i in xrange(iTypeCount):
+      
+      lstThisAgent = []
+      szTypeName = struct.unpack('16s', szCommand[iCurPos: iCurPos+struct.calcsize('16s')])[0]
+      iCurPos += struct.calcsize('16s')
+           
+      szTypeName = self.cleanNullTerminatedString(szTypeName)
+      
+      lstThisAgent = [szTypeName]
+      
+      iAgentCount = struct.unpack('i', szCommand[iCurPos:iCurPos+struct.calcsize('i')])[0]
+      iCurPos += struct.calcsize('i')
+      
+      for j in xrange(iAgentCount):
+        iCurAgentId = struct.unpack('i', szCommand[iCurPos:iCurPos+struct.calcsize('i')])[0]
+        iCurPos += struct.calcsize('i')
+        lstThisAgent.append(iCurAgentId)
+      
+      lstCommand.append(lstThisAgent)
+      
+    return lstCommand
+  
+  def packSimulationCommand(self, lstCommand):
+    """Byte structure
+    0-15 = Command name
+    16-19 = simtime
+    20-23 = number of types
+    24-39 = typename
+    40-43 = number of agents
+    ....."""
+    szCommand = ""
+    szCommand = struct.pack('16si', lstCommand[0], lstCommand[1])
+    szCommand += struct.pack('i', len(lstCommand[2:]))
+    for i in lstCommand[2:]:
+      szCommand += struct.pack('16s', i[0])
+      szCommand += struct.pack('i', len(i[1:]))
+      for j in i[1:]:
+        szCommand += struct.pack('i', j)
+
+    return szCommand
+                              
+                               
+    
+      
+  def createSimulationCommands(self, iSimTime):
+    """Structure of Command Packet for SIM
+    id = SIM
+
+    command[0] = 'SIM'
+    command[1] = 'Current sim time'
+    command[2][0] = 'type name'
+    command[2][1 – n] = 'type id's'
+    command[3][0] = 'type name'
+    command[3][1 – n] = 'type id's'"""
+    
+    dictCommands = {}
+    
+    dictAgentCount = {}
+    dictAgents = {}
+    for i in self.db.readTypes():
+      dictAgents[i] = self.db.getAgentsOfType(i)
+      dictAgentCount[i] = len(dictAgents[i])
+    
+    times = []
+    for i in self.lstHosts:
+      times.append(float(i.iterTime[CMD_SIMULATE] + i.iterTime[CMD_UPDATEDB]) / i.iTotalCount)
+      
+    lcm = 1
+    for i in times:
+      lcm *= i
+      
+
+    times = [float(lcm) / i for i in times]
+
+    
+    totaltime = sum(times)
+    
+    for i in xrange(len(self.lstHosts)):
+      dictCommands[i] = [CMD_SIMULATE, iSimTime]
+      
+      lstKeys = dictAgentCount.keys()
+      for j in lstKeys:
+        lstThisCommand = [j]
+        
+        if i == len(self.lstHosts) - 1:
+          lstThisCommand.extend(dictAgents[j])
+        else:      
+          iSlice = int(times[i] / totaltime * dictAgentCount[j]) + 1
+          lstThisCommand.extend(dictAgents[j][:iSlice])
+          dictAgents[j] = dictAgents[j][iSlice:]
+        
+      dictCommands[i].append(lstThisCommand)
+      
+    return dictCommands
+    
+    
+    #iAgentCount = 0
+    #dictAgents = {}
+    #for i in self.db.readTypes():
+      #dictAgents[i] = self.db.getAgentsOfType(i)
+      #iAgentCount += len(dictAgents[i])
+
+    #iHostCount = len(self.lstHosts)
+    #iAgentsPerHost = iAgentCount / iHostCount + 1
+    
+
+    #iHostId =  0
+    #lstThisHost = []
+    #dictCommands = {}
+    #for i in xrange(len(self.lstHosts)):
+      #dictCommands[i] = [CMD_SIMULATE, iSimTime]
+      #for j in dictAgents.keys():
+        #lstThisType = [j]
+        #if not (i == len(self.lstHosts) - 1):
+          #lstThisType.extend(dictAgents[j][iAgentsPerHost * i : iAgentsPerHost * (i + 1)])
+        #else:
+          #lstThisType.extend(dictAgents[j][iAgentsPerHost * i :])
+        #dictCommands[i].append(lstThisType)                             
+      #dictCommands[i] = pickle.dumps(dictCommands[i])
+      
+  def addHost(self, simname, host, port):
+    h = HOST()
+    self.lstHosts.append(h)
+    h.createThread(simname, host, port, 'traffic', 'localhost', 'traffic', 'SimTraffic')
+    return SUCCESS
+
+  def deleteHost(self, iHostIndex):
+    return FAILURE
+
+  def restartSimulation(self):
+    # ------------------------------------------------# 
+    self.db.curs.execute("drop table if exists test")
+    self.db.curs.execute("drop table if exists m_messages")
+    self.db.curs.execute("drop table if exists m_types")
+    self.db.createTables()
+    # ------------------------------------------------# 
+    #return self.db.clearDB()
+    
+  def Initialize(self):
+    self.bLaunchGUI = True
+    if len(sys.argv) > 3:
+      if '-nogui' in sys.argv:
+        self.bLaunchGUI = False
+  
+    self.objUIInterface = UIInterface(self,self.bLaunchGUI)
+    self.objUIInterface.app.exec_loop()
+
+   
+  def start(self):
+    global agent_types
+    self.logger.debug('Instantiating wh')
+    wh = world_handler()
+    self.simtime = 0
+    
+    dictCommands = {}
+    
+    
+    wh.begin()
+    
+    if not self.bLaunchGUI : 
+      for i in sys.argv[sys.argv.index('-nogui') + 2:]:
+        if i.lower() == '-nogui':
+          continue
+        szHost = i[:i.find(':')]
+        iPort = int(i[i.find(':') + 1:])
+        self.addHost(sys.argv[sys.argv.index('-nogui') + 1], szHost, iPort)
+    
+      for i in self.lstHosts:
+        while i.getState() != S_READY:
+          print "Waiting for host: ", i.szHost, ':', i.iPort
+          time.sleep(1)
+                   
+                   
+    print "Starting Simulation"
+    while not self.bSimDone() :
+      self.evStartSim.wait()
+
+      self.logger.debug('-'*50)
+      self.logger.debug('Mainloop beginning. simtime = ' + str(self.simtime))
+
+      loop_stime = time.time()
+      
+      wh.beginUpdate(self.simtime, self)
+
+      iCreateSimCommand = time.time()
+      if not (self.simtime % 1):
+        dictCommands = self.createSimulationCommands(self.simtime)
+      
+      iSendSim = time.time()
+      for i in xrange(len(self.lstHosts)):
+        self.lstHosts[i].sendCommand(CMD_SIMULATE, (dictCommands[i]))
+        self.logger.debug('Sent Command SIMULATTE to: ' + str(self.lstHosts[i].szHost) + ':' + str(self.lstHosts[i].iPort))
+        
+      iWaitSim = time.time()  
+      for i in self.lstHosts:
+        self.logger.debug('Waiting on SIMULATE ' + str(i.szHost) + ':' + str(i.iPort))
+        i.wait()
+        self.logger.debug('Woke Up on SIMULATE ' + str(i.szHost) + ':' + str(i.iPort))        
+        
+      iUpdateDB = time.time()
+      for i in self.lstHosts:
+        i.sendCommand(CMD_UPDATEDB, [CMD_UPDATEDB])
+        self.logger.debug('Sent UpdateDB to ' + str(i.szHost) + ':' + str(i.iPort))
+        
+      iWaitUpdateDB = time.time()
+      for i in self.lstHosts:
+        self.logger.debug('Waiting on UPDATEDB ' + str(i.szHost) + ':' + str(i.iPort))
+        i.wait()
+        self.logger.debug('Woke up on UPDATEDB ' + str(i.szHost) + ':' + str(i.iPort))        
+      
+      iEnd = time.time()
+      self.simtime += 1
+
+      #update the gui now
+      self.objUIInterface.updateUI()
+      #-------------------
+      
+      if not (self.simtime % 1) and 1:
+        print ("FT: " + str(time.time() - loop_stime) + " - " + str(self.simtime))
+        
+      lstTimes = [ iSendSim - iCreateSimCommand, iWaitSim - iSendSim, iUpdateDB - iWaitSim, iWaitUpdateDB - iUpdateDB, iEnd - iWaitUpdateDB]
+      lstTimes = [(i * 1000) for i in lstTimes]
+      print ( "TIMES:", '-' * 30 )
+      logTimes = ""
+      for i in lstTimes:
+        logTimes +=  '%.2f'%(i,) + ","
+      print (logTimes)
+      for i in self.lstHosts:
+        ival = sum(i.iterTime.values())
+        print ( "Host: ", i.szHost, ':', i.iPort, '-',  ival, i.iTotalCount, float(ival) / float(i.iTotalCount))
+      print ('='*50)
+      
+    wh.end()
+    
+    
+    for i in self.lstHosts:
+      i.sendCommand(CMD_QUIT, [CMD_QUIT])
+
+  def exit(self):
+    self.quit = True

@@ -1,0 +1,4 @@
+
+canStartSim: getState
+
+start: sendCommand

@@ -1,0 +1,13 @@
+The user should inherit a class from the defagenthandler:
+
+The user should override the following function:
+update(simtime): this function should contain the update code for the agent type.
+
+The following functions are provided by the agenthandler:
+
+sendMessage(totype, toid, message): the agent can send the message 'message' to the agent of type 'to_type' and  id 'to_id' 
+getMessages(): this function will return a list of all messages. Each message is a list of fromType, fromId, simtime and the actual message
+readState(): this function will return a dictionary of the current state of the agent
+writeState(): this function will update the dictionary defined by self.fields to the database
+
+kill(): this function kills the agents.

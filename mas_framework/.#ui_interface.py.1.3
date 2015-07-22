@@ -1,0 +1,60 @@
+from constants import *
+from qt import *
+
+from gui_qtinterface import *
+
+import sys
+import threading
+
+class UIInterface:
+    def __init__(self, api, bLaunchGUI = True):
+        print "bLaunchGUI: ",
+        print bLaunchGUI
+
+        self.bLaunchGUI = bLaunchGUI
+        
+        self.api = api
+        # self.gui = None
+        if bLaunchGUI:
+
+            self.updateGLThread = threading.Thread(target = self.updateGL)
+            self.evUpdateGL = threading.Event()
+            self.evUpdateGL.clear()
+            
+            app = QApplication(sys.argv)
+            self.UIForm = UI(self)
+            self.UIForm.show()
+            app.setMainWidget(self.UIForm)
+            self.api.MainLoopThread.start()
+            self.updateGLThread.start()
+            app.exec_loop()
+        else:
+            self.api.evStartSim.set()
+            self.api.start()
+
+    def addHost(self, simname, host, port):
+        return self.api.addHost(simname, str(host), int(port))
+
+    def deleteHost(self, iHostIndex):
+        return self.api.deleteHost(iHostIndex)
+
+    def canStartSim(self):
+        print self.api.canStartSim()
+        return self.api.canStartSim()
+
+    def startSim(self):
+        self.api.startSim()
+
+    def updateUI(self):
+        if self.bLaunchGUI :
+            self.evUpdateGL.clear()
+
+    def updateGL(self):
+        return
+        while not self.api.bSimDone():
+            self.evUpdateGL.wait()
+            #actually update
+            self.evUpdateGL.set()
+    
+    def quit(self):
+        self.api.exit()

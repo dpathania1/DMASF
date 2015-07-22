@@ -1,0 +1,12 @@
+The user can inherit a class from the defworldhandler class and override some or all of the following functions:
+
+begin():This function is called before the beginning of the simulation. This function should be used to initialise the simulation state of the system.
+
+beginUpdate(simtime, api): this function is called whenever an iteration over all the agents starts. simtime is the iteration number and the api argument is the instance of the api class which is active.
+
+endUpdate(simtime, api): this function is called whenever an iteration over all the agents ends. simtime is the iteration number and the api argument is the instance of the api class which is active.
+
+end(): This function is called at the end of the simulation.
+
+
+The defworldhandler (if directly used) will do nothing but 'pass' whenever these functions are called.

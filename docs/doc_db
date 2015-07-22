@@ -1,0 +1,13 @@
+DB() class: returns a DB object
+
+clearDB(): clear the DB. If this function is not called, the previous state of the db is maintained and the user can resume the simulation from where he stopped last time.
+
+readTypes(): returns a list of types of agents
+
+readObject(agent_type, agent_id): Reads the object of the type agent_type and id agent_id from the database and return a dictionary of the values.
+
+getAggregateValue(agtype, agfunction, property): applies the aggregate function to the all agents of type agtype on the property 'property'
+
+syncDB(): an update to the DB is done only after all the agents have been iterated over once. This function makes sure that the update is done as soon as this function is called.
+
+getAgentsOfType(agtype): returns the ids of all agents of the type agtype

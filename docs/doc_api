@@ -1,0 +1,29 @@
+API(): this is the default constructor. This will return an instance of the api class
+
+The following functions are provided:
+
+setMaxSimTime(maxtime): the simulation will run for a maximum of maxtime iterations. If this function is not called, the simulation will keep running indefinitely.
+
+registerAgentType(agtype, handler, renderfunc, fields): This function is used to register an agent type. The class defined by handler shall be used as the agenthandler for this type.
+
+The default properties for each agent are:
+id: TYPE_INTEGER
+x: TYPE_FLOAT 
+y: TYPE_FLOAT (x,y coordinates )
+size: TYPE_INTEGER ( size used by GUI )
+theta: TYPE_FLOAT
+shape: the default shapes provided are SHAPE_TRIANGLE, SHAPE_CIRCLE, SHAPE_SQUARE or SHAPE_USER. In case SHAPE_USER is specified, the function renderfunc defined by the third argument of the function is used to draw the agent.
+color: the default colors provided are COLOR_RED, COLOR_GREEN, COLOR_BLUE, COLOR_GREY, COLOR_BLACK, COLOR_WHITE. User can define his own colors by specifying RGB(red, green, blue)
+
+User can specify any additional fields in the dictionary fields specified by the fourth argument of the function.
+
+
+killAgent(agtype, agentId)
+
+createAgent(agtype, fields)
+
+registerWorldHandler
+
+start0
+
+start1

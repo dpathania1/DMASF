@@ -1,0 +1,37 @@
+AGENT agtype DICTIONARY CONTAINS
+
+__agtype__ = <agent type>
+__handler__ = <agent handler>
+__renderfunc__ = <render function>
+__properties__ = dictionary with (property_name, data type)>0.
+
+
+
+FIELDS DICTIONARY CONTAINS
+id
+x
+y
+size
+shape
+color : can also be specified as RGB([0-255],...)
+theta - in radians
+USER DEFINED PROPERTIES
+
+FIELDS dictionary is what is used for exchanging data with the db
+
+CACHING
+Caching done as follows. 
+
+for invalidating the cache we set all values to None and __cache__.__valid__ to 0
+when access check if cache is valid and the value we want is not none. if true then hooray
+else update the cache and set valid = 1
+
+
+TODO
+1. implement transactions for inserting a new row
+2. ask user to specify static fields
+3. cache the id's of agents i.e. we know when agents are created / destroyed and we know the id we give them so we can create a list and add / delete ids from there
+4. THe cached values of aggregate functions should be updated on a perfunction basis ...
+   a. count should be invalidated only on add / del agent
+   b. others etc ...
+   right now down on all
